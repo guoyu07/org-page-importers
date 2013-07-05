@@ -6,12 +6,13 @@ __author__ = "Puneeth Chaganti"
 __copyright__ = "Copyright 2011"
 __license__ = "GPLv3"
 __version__ = "0.7"
-__email__ = "punchagan@muse-amuse.in"
+__email__ = "guweigang@outlook.com"
 
 
 import os
 import argparse
 import logging
+import translate
 
 
 from time import strptime, strftime
@@ -29,6 +30,22 @@ SUBTREE_TEMPLATE = u"""\
 %(space)s :END:
 
 %(space)s %(text)s
+
+"""
+
+SUBTREE_TEMPLATE = u"""\
+#+TITLE: %(title)s
+#+AUTHOR: Gu Weigang
+#+EMAIL: %(email)s
+#+DATE: %(date)s
+#+URI: %(link)s
+#+KEYWORDS: 
+#+TAGS: %(tags)s
+#+LANGUAGE: zh_CN
+#+OPTIONS: H:3 num:nil toc:nil \\n:nil ::t |:t ^:nil -:nil f:t *:t <:t
+#+DESCRIPTION: %(description)s
+
+%(text)s
 
 """
 
@@ -69,8 +86,13 @@ def xml_to_list(infile):
         post = dict()
 
         post['title'] = node.getElementsByTagName('title')[0].firstChild.data
-        post['link'] = node.getElementsByTagName('link')[0].firstChild.data
-        post['date'] = node.getElementsByTagName('pubDate')[0].firstChild.data
+        post['link']  = node.getElementsByTagName('link')[0].firstChild.data
+        post['date']  = node.getElementsByTagName('pubDate')[0].firstChild.data
+        desc = node.getElementsByTagName('description')[0].firstChild
+        if desc:
+            post['description'] = desc.data
+        else:
+            post['description'] = ""
         post['author'] = node.getElementsByTagName(
             'dc:creator')[0].firstChild.data
         post['id'] = node.getElementsByTagName('wp:post_id')[0].firstChild.data
@@ -118,7 +140,10 @@ def parse_date(date, format):
     date = strftime(format, date)
     return date
 
-def blog_to_org(blog_list, name, level, buffer, prefix):
+def title_to_english(title):
+    return translate.translate("zh_CN", "en_US", title)
+
+def blog_to_org(blog_list, name, level, buff, prefix):
     """Converts a blog-list into an org file."""
 
     space = ' ' * level
@@ -126,8 +151,8 @@ def blog_to_org(blog_list, name, level, buffer, prefix):
 
     tag_sep = cat_sep = ', '
 
-    if buffer:
-        template = BUFFER_TEMPLATE
+    if buff:
+        template = SUBTREE_TEMPLATE
     else:
         template = SUBTREE_TEMPLATE
         tag_sep = ':'
@@ -135,33 +160,38 @@ def blog_to_org(blog_list, name, level, buffer, prefix):
 
     for post in blog_list:
         post['tags'] = tag_sep.join(post['tags'])
-        if tag_sep == ':':
-            post['tags'] = ':' + post['tags'] + ':'
         post['categories'] = cat_sep.join(post['categories'])
         date_wp_fmt = post['date']
-        post['date'] = parse_date(date_wp_fmt, '[%Y-%m-%d %a %H:%M]')
+        title = title_to_english(post['title'])
+        post['date'] = parse_date(date_wp_fmt, '%Y-%m-%d %a')
+        post['link'] = parse_date(date_wp_fmt, '/blog/%Y/%m/%d/'+title+'/')
+        dirname      = "blog/" + parse_date(date_wp_fmt, '%Y')
 
-        if not buffer:
-            post['text'] = post['text'].replace('\n', '\n %s' % space)
+        if not buff:
+            post['text'] = post['text'].replace('\n', '\n %s' % space).decode("utf-8", "ignore").encode("utf-8")
 
-        post_output = template % dict(post, **{'space': space, 'stars': stars})
+	try:        
+	    post_output = template % dict(post, **{'space': space, 'stars': stars, 'email': __email__})
+	except:
+	    print(post['title'])
+	    continue
 
-        if buffer:
+        if buff:
             if prefix:
                 file_name = "%s-%s" % (parse_date(date_wp_fmt, '%Y-%m-%d'),
                                        link_to_file(post['link']))
             else:
-                file_name = link_to_file(post['link'])
-            if not os.path.exists(name):
-                os.mkdir(name)
-            else:
-                f = open(os.path.join(name, file_name), 'w')
-                f.write(post_output.encode('utf8'))
-                f.close()
+                file_name = title+".org"
+            if not os.path.exists(dirname):
+                os.makedirs(dirname)
+            f = open(os.path.join(dirname, file_name), 'w')
+            f.write(post_output.encode('utf8'))
+            f.close()
         else:
             f.write(post_output.encode('utf8'))
 
-    f.close()
+    if (not buff):
+        f.close()
 
 if __name__ == "__main__":
 
@@ -171,7 +201,7 @@ if __name__ == "__main__":
 
     parser.add_argument('in_file', help='the input xml file exported from WP')
     parser.add_argument('--buffer', action='store_true',
-                        help='enable to obtain a separate file for each post')
+                        help='enable to obtain a separate file for each post', default=True)
     parser.add_argument('--prefix-date', action='store_true',
                         help='prefix a date to the post files, when --buffer')
     parser.add_argument('-l', '--level', type=int, default=1,
@@ -184,7 +214,6 @@ if __name__ == "__main__":
     FORMAT = '%(message)s'
     logging.basicConfig(format=FORMAT)
     logger = logging.getLogger()
-
 
     logger.warning("Parsing xml ...")
     blog_list = xml_to_list(args.in_file)
